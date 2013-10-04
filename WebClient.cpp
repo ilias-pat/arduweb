@@ -16,159 +16,246 @@
 #define STATE_DISCARD_OPTION_VALUE    ( 0x08 )
 
 WebClient::WebClient( void )
-	: EthernetClient( ), mBufferIndex( 0 ), mParserState( STATE_READ_METHOD ), mCurrentLineIsEmpty( true )
+	: EthernetClient( ), mBufferIndex( 0 )
 {
 	memset( mBuffer, 0, WEB_CLIENT_BUFFER_SIZE );
 }
 
 WebClient::WebClient( const EthernetClient& client ) 
-	: EthernetClient( client ), mBufferIndex( 0 ), mParserState( STATE_READ_METHOD ), mCurrentLineIsEmpty( true )
+	: EthernetClient( client ), mBufferIndex( 0 )
 {
 	memset( mBuffer, 0, WEB_CLIENT_BUFFER_SIZE );
 }
 
-boolean WebClient::readHTTPReqHeader( struct HTTPReqHeader& header )
+boolean WebClient::writeHTTPRequest( const char* method, const char* url, const unsigned char* data, int size )
 {
-	int result = PROCESS_CONTINUE;
-	mBufferIndex = 0;
-	mParserState = STATE_READ_METHOD; // first element of http req.
-	Serial.println("req data:");
-	while( connected( ) && available( ) && result == PROCESS_CONTINUE )
-	{
-		char c = read( );
-                Serial.print( c );
-		result = processHTTPReqHeaderByte( header, c );
-	}
-	
-	if( result != PROCESS_DONE )
-	{
-		// TODO: flush rx buffer ?
-		EthernetClient::flush( );
-		return false;
-	}
+    if( !method || !url )
+        return false;
 
-	return true;
+    // write HTTP header.
+    write( method );
+    write( ' ' );
+    write( url );
+    write( ' ' );
+    write( "HTTP/1.0" );
+    write( "\r\n" );
+    write( "Content-Length: " );
+    print( size );
+    write( "\r\n" );
+    write( "\r\n" );
+
+    // write HTTP body.
+    if( strcmp( method, "POST" ) == 0 &&
+        data && size > 0 )
+    {
+        write( data, size );
+    }
+
+    return true;
 }
 
-boolean WebClient::writeHTTPReqHeader( const struct HTTPReqHeader& header )
+boolean WebClient::readHTTPRequest( char* method, char* url, char* data, int* size, int max_size )
 {
-	mBufferIndex = 0;
-	
-	switch( header.method )
-	{
-	case HTTP_METHOD_HEAD:
-	default:
-		write_pgm( PSTR( "HEAD " ) );
-		break;
-		
-	case HTTP_METHOD_GET:
-		write_pgm( PSTR( "GET " ) );
-		break;
-		
-	case HTTP_METHOD_POST:
-		write_pgm( PSTR( "POST " ) );
-		break;
-	}
-	
-	print( header.url );
-	
-	switch( header.version )
-	{	
-	case HTTP_VER_1_0:
-		write_pgm( PSTR( " HTTP/1.0" ) );
-		break;
-	
-	case HTTP_VER_1_1:
-	default:
-		write_pgm( PSTR( " HTTP/1.1" ) );
-		break;		
-	}
-	
-	if( header.content_length > 0 )
-	{
-		write_pgm( PSTR( "Content-length: " ) );
-		println( header.content_length );
-	}
-
-	println( );
-	
-        flush( );
+    int state = STATE_READ_METHOD;
+    const char* word;
+    
+    if( !method || !url )
+        return false;
+    
+    // init data
+    *method = '\0';
+    *url = '\0';
+    *data = '\0';
+    *size = 0;
+    
+    // read header.
+    while( word = getNextWordUntilNewLine( ) )
+    {
+        // this is an empty line.
+        // end of header.
+        if( !strlen( word ) )
+            break;
         
-	return true;
+        Serial.print( '[' );
+        Serial.print( (int)state );
+        Serial.print( '[' );
+        Serial.println( word );        
+ 	switch( state )
+	{
+	case STATE_READ_METHOD:
+            if( getHTTPMethodFromStr( word ) != HTTP_METHOD_INVALID )
+            {
+                strcpy( method, word );
+                state = STATE_READ_URL;
+            }
+            break;
+
+	case STATE_READ_URL:
+            // TODO: urlDecode( )
+            strcpy( url, word );
+            state = STATE_READ_VERSION;
+            break;
+            
+    	case STATE_READ_VERSION:
+            if( getHTTPVersionFromStr( word ) != HTTP_VER_INVALID )
+                state = STATE_READ_OPTION_KEY;
+            break;
+
+	case STATE_READ_OPTION_KEY:
+            if( strstr( word, "Content-Length:" ) )
+                state = STATE_READ_OPTION_CONTENT_LENGTH;
+            break;
+
+	case STATE_READ_OPTION_CONTENT_LENGTH:
+            if( size ) 
+                *size = atoi( word );
+	    state = STATE_READ_OPTION_KEY;
+	    break;
+        }
+    }
+    
+    // read body if any.
+    if( data && size )
+    {
+        if( *size > max_size )
+            *size = max_size;
+        
+        int len = 0;
+        while( available( ) && len < *size )
+            data[len++] = read( );
+    }
+    
+    flush( );
+    
+    if( getHTTPMethodFromStr( method ) == HTTP_METHOD_INVALID )
+        return false;
+
+    return true; 
 }
 
-boolean WebClient::readHTTPRespHeader( struct HTTPRespHeader& header )
+boolean WebClient::writeHTTPResponse( int status, const char* mime_type, const unsigned char* data, int size )
 {
-	int result = PROCESS_CONTINUE;
-	mBufferIndex = 0;
-	mParserState = STATE_READ_VERSION; // first element of http resp.
-	
-	while( connected( ) && available( ) && result == PROCESS_CONTINUE )
-	{
-		char c = read( );
-		result = processHTTPRespHeaderByte( header, c );
-	}
-	
-	if( result != PROCESS_DONE )
-	{
-		// TODO: flush rx buffer ?
-		EthernetClient::flush( );
-		return false;
-	}
-
-	return true;
-
+    if( !status )
+        return false;
+    
+    // write HTTP header.
+    write( "HTTP/1.0" );
+    write( ' ' );
+    switch( status )
+    {
+    case 200: write( "200 OK" ); break;   
+    default:
+    case 400: write( "400 Bad Request" ); break;
+    case 404: write( "404 Not Found" ); break;
+    }
+    write( "\r\n" );
+    if( mime_type )
+    {
+        write( "Content-Type:" );
+        write( ' ' );
+        write( mime_type );
+        write( "\r\n" );        
+    }
+    write( "Content-Length:" );
+    write( ' ' );    
+    print( size );
+    write( "\r\n" );
+    write( "\r\n" );
+    
+    // write HTTP body
+    if( data && size > 0 )
+    {
+        write( data, size );  
+    }
+    
+    return true;
 }
 
-boolean WebClient::writeHTTPRespHeader( const struct HTTPRespHeader& header )
+boolean WebClient::readHTTPResponse( int* status, char* mime_type, unsigned char* data, int* size, int max_size )
 {
-	mBufferIndex = 0;
-	
-	switch( header.version )
+    int state = STATE_READ_VERSION;
+    const char* word;
+    
+    if( !status )
+        return false;
+    
+    // init data
+    *status = HTTP_STATUS_INVALID;
+    *mime_type = '\0';
+    *data = '\0';
+    *size = 0;
+    
+    // read header.
+    while( word = getNextWordUntilNewLine( ) )
+    {
+        // this is an empty line.
+        // end of header.
+        if( !strlen( word ) )
+            break;
+                
+ 	switch( state )
 	{
-	case HTTP_VER_1_0:
-		write_pgm( PSTR( "HTTP/1.0 " ) );
-		break;
+	case STATE_READ_VERSION:
+            if( getHTTPVersionFromStr( word ) != HTTP_VER_INVALID )
+                state = STATE_READ_STATUS;
+            break;
 		
-	case HTTP_VER_1_1:
-	default:	
-		write_pgm( PSTR( "HTTP/1.1 " ) );
-		break;
-	}
-	
-	switch( header.status )
-	{
-	case HTTP_STATUS_200_OK:
-		write_pgm( PSTR( "200 OK\r\n" ) );
-		write_pgm( PSTR( "Pragma: no-cache\r\n" ) );                
-		break;
-			
-	case HTTP_STATUS_400_BAD_REQ:
-	default:
-		write_pgm( PSTR( "400 Bad Request\r\n" ) );
-		write_pgm( PSTR( "Connection: close\r\n" ) );             
-		break;
-			
-	case HTTP_STATUS_404_NOT_FOUND:
-		write_pgm( PSTR( "404 Not Found\r\n" ) );
-		break;
-	}
+	case STATE_READ_STATUS:
+            *status = getHTTPStatusFromStr( word );
+            state = STATE_READ_OPTION_KEY;
+            break;
 
-	if( header.mime_type )
-	{
-		write_pgm( PSTR( "Content-type: " ) );
-		println( header.mime_type );
-	}
+	case STATE_READ_OPTION_KEY:
+            if( strstr( word, "Content-Length:" ) )
+                state = STATE_READ_OPTION_CONTENT_LENGTH;
+            else if( strstr( word, "Content-Type:" ) )
+                state = STATE_READ_OPTION_MIME_TYPE;
+            break;
 
-	if( header.content_length > 0 )
-	{
-		write_pgm( PSTR( "Content-length: " ) );
-		println( header.content_length );
-	}
+	case STATE_READ_OPTION_CONTENT_LENGTH:
+            if( size ) 
+                *size = atoi( word );
+	    state = STATE_READ_OPTION_KEY;
+	    break;
+		
+	case STATE_READ_OPTION_MIME_TYPE:
+            if( mime_type )
+                strcpy( mime_type, word );
+            state = STATE_READ_OPTION_KEY;
+            break;
+        }
+    }
+    
+    // read body if any.
+    if( data && size )
+    {
+        if( *size > max_size )
+            *size = max_size;
+        
+        int len = 0;
+        while( available( ) && len < *size )
+            data[len++] = read( );
+    }
+    
+    flush( );
+    
+    if( *status == HTTP_STATUS_INVALID )
+        return false;
 
-	println( );
+    return true;   
+}
 
-	return true;
+boolean WebClient::waitForResponse( int timeout )
+{
+    unsigned long now = millis( );
+
+    while( !available( ) )
+    {
+        if( millis( ) - now >= ( unsigned long )timeout )
+            return false;
+    }
+    
+    return true;
 }
 
 size_t WebClient::write_pgm( const prog_char* str )
@@ -185,259 +272,35 @@ size_t WebClient::write_pgm( const prog_char* str )
 	return ( ptr - str - 1 );
 }
 
-size_t WebClient::write( uint8_t c )
+const char* WebClient::getNextWordUntilNewLine( void )
 {
-        Serial.print( '[' );
-        Serial.print( (char)c ); 
-        Serial.print( ']' );        
-	mBuffer[mBufferIndex++] = c;
-	if( mBufferIndex >= WEB_CLIENT_BUFFER_SIZE )
-	{
-		EthernetClient::write( ( const uint8_t* )mBuffer, mBufferIndex );
-		mBufferIndex = 0;
-	}
-	return 1;
-}
-
-
-void WebClient::flush( void )
-{
-	if( mBufferIndex )
-	{
-		EthernetClient::write( ( const uint8_t* )mBuffer, mBufferIndex );
-		mBufferIndex = 0;
-	}
-
-	// flush rx buffer.
-	EthernetClient::flush( );
-}
-
-void WebClient::stop( void )
-{
-	flush( );
-	EthernetClient::stop( );
-}
-/*
-WebClient& WebClient::operator=( const EthernetClient& client )
-{
-    *this = client;
-    return *this;
-}
-*/
-int WebClient::processHTTPReqHeaderByte( struct HTTPReqHeader& header, char c )
-{
-	mBuffer[mBufferIndex++] = ( uint8_t )c;
-	
-	// buffer has overflown. can't process request.
-	if( mBufferIndex > WEB_CLIENT_BUFFER_SIZE )
-		return PROCESS_ERROR;
-	
-	// we 've reached the end of the header.
-	if( c == '\n' && mCurrentLineIsEmpty )
-		return PROCESS_DONE;
-		
-	switch( mParserState )
-	{
-	case STATE_READ_METHOD:
-		if( c == ' ' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-			header.method = getHTTPMethodFromStr( ( const char* )mBuffer );
-			mParserState = STATE_READ_URL;
-		}
-		break;
-
-	case STATE_READ_URL:
-		if( c == ' ' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-
-			if( strlen( ( const char* )mBuffer ) <= MAX_HTTP_URL_SIZE )
-			{
-				strcpy( header.url, ( const char* )mBuffer );
-				mParserState = STATE_READ_VERSION;
-			}
-			else
-			{
-				return PROCESS_ERROR;
-			}
-		}
-		break;
-
-	case STATE_READ_VERSION:
-		if( c == '\n' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-			header.version = getHTTPVersionFromStr( ( const char* )mBuffer );
-			mParserState = STATE_READ_OPTION_KEY;
-		}
-		break;
-
-	case STATE_READ_OPTION_KEY:
-		if( c == ' ' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-
-			if( strstr( ( const char* )mBuffer, "Content-Length:" ) )
-			{
-				mParserState = STATE_READ_OPTION_CONTENT_LENGTH;
-			}
-                        else
-                        {
-                                mParserState = STATE_DISCARD_OPTION_VALUE; 
-                        }
-		}
-		break;
-
-	case STATE_READ_OPTION_CONTENT_LENGTH:
-		if( c == '\n' )
-		{
-			 // exclude '\r'.
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-			header.content_length = atoi( ( const char* )mBuffer );
-			mParserState = STATE_READ_OPTION_KEY;
-		}
-		break;
-
-        case STATE_DISCARD_OPTION_VALUE:
-                mBufferIndex = 0;
-                if( c == '\n' )
-                    mParserState = STATE_READ_OPTION_KEY;
-                break;
-	}
-
-	if( c == '\n' )
-	{
-		// starting a new line
-		mCurrentLineIsEmpty = true;
-	} 
-	else if( c != '\r' ) 
-	{
-		// got a character on the current line
-		mCurrentLineIsEmpty = false;
-	}
-
-	return PROCESS_CONTINUE;
-}
-
-int WebClient::processHTTPRespHeaderByte( struct HTTPRespHeader& header, char c )
-{
-	mBuffer[mBufferIndex++] = ( uint8_t )c;
-	
-	// buffer has overflown. can't process request.
-	if( mBufferIndex > WEB_CLIENT_BUFFER_SIZE )
-		return PROCESS_ERROR;
-	
-	// we 've reached the end of the header.
-	if( c == '\n' && mCurrentLineIsEmpty )
-		return PROCESS_DONE;
-		
-	switch( mParserState )
-	{
-	case STATE_READ_VERSION:
-		if( c == ' ' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-			header.version = getHTTPVersionFromStr( ( const char* )mBuffer );
-			mParserState = STATE_READ_STATUS;
-		}
-		break;
-		
-	case STATE_READ_STATUS:
-		if( c == ' ' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-			header.status = getHTTPStatusFromStr( ( const char* )mBuffer );
-			mParserState = STATE_READ_STATUS_STR;
-		}
-		break;
-
-	case STATE_READ_STATUS_STR:
-		if( c == '\n' )
-		{
-			// do not store status str.
-			mBufferIndex = 0;
-			mParserState = STATE_READ_OPTION_KEY;
-		}
-		break;
-
-	case STATE_READ_OPTION_KEY:
-		if( c == ' ' )
-		{
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-
-			if( strstr( ( const char* )mBuffer, "Content-Length:" ) )
-			{
-				mParserState = STATE_READ_OPTION_CONTENT_LENGTH;
-			}
-			else if( strstr( ( const char* )mBuffer, "Content-Type:" ) )
-			{
-				mParserState = STATE_READ_OPTION_MIME_TYPE;
-			}
-                        else
-                        {
-                                mParserState = STATE_DISCARD_OPTION_VALUE;
-                        }
-		}
-		break;
-
-	case STATE_READ_OPTION_CONTENT_LENGTH:
-		if( c == '\n' )
-		{
-			 // exclude '\r'.
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-			header.content_length = atoi( ( const char* )mBuffer );
-			mParserState = STATE_READ_OPTION_KEY;
-		}
-		break;
-		
-	case STATE_READ_OPTION_MIME_TYPE:
-		if( c == '\n' )
-		{
-			 // exclude '\r'.
-			mBuffer[--mBufferIndex]  = '\0';
-			mBufferIndex = 0;
-
-			if( strlen( ( const char* )mBuffer ) <= MAX_HTTP_MIME_TYPE_SIZE )
-			{
-				strcpy( header.mime_type, ( const char* )mBuffer );
-				mParserState = STATE_READ_OPTION_KEY;
-			}
-			else
-			{
-				return PROCESS_ERROR;
-			}
-		}
-		break;
-
-        case STATE_DISCARD_OPTION_VALUE:
-                mBufferIndex = 0;
-                if( c == '\n' )
-                    mParserState = STATE_READ_OPTION_KEY;
-                break;	
-	}
-
-	if( c == '\n' )
-	{
-		// starting a new line
-		mCurrentLineIsEmpty = true;
-	} 
-	else if( c != '\r' ) 
-	{
-		// got a character on the current line
-		mCurrentLineIsEmpty = false;
-	}
-
-	return PROCESS_CONTINUE;
+    char* buffer = ( char* )mBuffer;
+    
+    // init buffer
+    *buffer = '\0';
+    
+    while( available( ) )
+    {
+        char c = read( );
+        
+        if( c == '\n' )
+        {
+            *buffer = '\0';
+            break;
+        }
+        else if( c == ' ' || c == ';' )
+        {
+            *buffer = '\0';
+            if( strlen( ( const char* )mBuffer ) )
+                break;   
+        }
+        else if( c != '\r' ) // do not store '\r'
+        {
+            *buffer++ = ( uint8_t )c;
+        }
+    }
+    
+    return ( const char* )mBuffer;
 }
 
 int WebClient::getHTTPMethodFromStr( const char* str )

@@ -105,34 +105,113 @@ boolean WebServer::begin( void )
 
 void WebServer::process( void )
 {
-	WebClient client = WebClient( Server.available( ) );
+       static unsigned long time = millis( );
+        
+        if( millis( ) - time >= 15000 )
+        {
+            time = millis( );
+            Serial.println( time );
+            
+            WebClient cl;
+            Serial.println("SENDING REQUEST");            
+            if( cl.connect( IPAddress( 192, 168, 1, 230 ), 80 ) )
+            {
+                Serial.println("connected");
+                 // Make a HTTP request:
+                /*
+                struct HTTPReqHeader h;
+                h.version = HTTP_VER_1_0;
+                h.method = HTTP_METHOD_GET;
+                h.url[0] = '/';
+                h.url[1] = '\0';
+                h.content_length = 0;
+                
+                cl.writeHTTPReqHeader( h );
+                */
+                cl.writeHTTPRequest( "POST", "/ard/getDat1a.php", ( uint8_t* )"value=1", 7 );
+                
+                if( cl.waitForResponse( 3000 ) )
+                {
+                    int status;
+                    char mime[16];
+                    unsigned char data[20];
+                    int size;
+                   
+                    
+                    //struct HTTPRespHeader respH;
+                    //if( cl.readHTTPRespHeader( respH ) )
+                    if( cl.readHTTPResponse( &status, mime, data, &size, 20 ))
+                    {
+                        Serial.println( "HTTP RESP received" );
+                        Serial.print( "Status: " );
+                        Serial.println( status );                
+                        Serial.print( "MIME: " );
+                        Serial.println( mime );
+                        Serial.print( "Len: " );
+                        Serial.println( size );
+                        
+                        Serial.println( "DATA:" );
+                        int len = 0;
+                        while( len < size )
+                        {
+                            Serial.print( ( char ) data[len] );
+                            len++;
+                        }
+                        Serial.println( len );
+                    }
+                    else
+                    {
+                        Serial.println( "resp parse failed" );
+                    }
+                    
+                }
+                else
+                {
+                    Serial.println( "resp timeout" );
+                }
+            }
+            else
+            {
+                Serial.println( "connect failed" );
+            }
+            cl.stop( );
+        }
+    
+    
+    	WebClient client = WebClient( Server.available( ) );
 
 	if( !client || !client.connected( ) )
 		return;
 	
-	struct HTTPReqHeader reqHeader;
+	//struct HTTPReqHeader reqHeader;
 
-	boolean result = client.readHTTPReqHeader( reqHeader );
+	//boolean result = client.readHTTPReqHeader( reqHeader );
+        char method[5];
+        char url[20];
+        int size;
+        char data[20];
+        boolean result = client.readHTTPRequest( method, url, data, &size, 20 );
         Serial.println( result ? "PARSE ok" : "PARSE NOK" );
 	if( result )
 	{
                 Serial.println( "HTTP Req received" );
-                Serial.print( "Version: " );
-                Serial.println( reqHeader.version );
                 Serial.print( "Method: " );
-                Serial.println( reqHeader.method );                
+                Serial.println( method );                
                 Serial.print( "URL: " );
-                Serial.println( reqHeader.url );
+                Serial.println( url );
                 Serial.print( "Len: " );
-                Serial.println( reqHeader.content_length );          
+                Serial.println( (int)size );          
 
-                char* url_filename = strrchr( reqHeader.url, '/' );
+                char* url_filename = strrchr( url, '/' );
 
 		if( url_filename && ( *( ++url_filename ) == '\0' ) )
                     strcpy( ( char* )url_filename, DEFAULT_DOC );
-
+                    
                 Serial.print( "Filename: " );
-                Serial.println( url_filename );                    
+                Serial.println( url_filename );                
+                Serial.print( "Data: " );
+                for( int i=0; i<size; i++ )
+                    Serial.print( (char)data[i] );                
 	}
 	else
 	{
@@ -142,54 +221,7 @@ void WebServer::process( void )
 	}
 
 	//PrintRequest( request );
-	client.stop( );
-
-        static int time = millis( );
-        
-        if( time - millis( ) >= 5000 )
-        {
-            time = millis( );
-            
-            WebClient cl;
-            Serial.println("SENDING REQUEST");            
-            if( cl.connect( IPAddress( 192, 168, 1, 230 ), 80 ) )
-            {
-                Serial.println("connected");
-                 // Make a HTTP request:
-                struct HTTPReqHeader h;
-                h.version = HTTP_VER_1_0;
-                h.method = HTTP_METHOD_GET;
-                h.url[0] = '/';
-                h.url[1] = '\0';
-                h.content_length = 0;
-                
-                cl.writeHTTPReqHeader( h );
-                
-                struct HTTPRespHeader respH;
-                if( cl.readHTTPRespHeader( respH ) )
-                {
-                    Serial.println( "HTTP RESP received" );
-                    Serial.print( "Version: " );
-                    Serial.println( respH.version );
-                    Serial.print( "Status: " );
-                    Serial.println( respH.status );                
-                    Serial.print( "MIME: " );
-                    Serial.println( respH.mime_type );
-                    Serial.print( "Len: " );
-                    Serial.println( respH.content_length );
-                }
-                else
-                {
-                    Serial.println( "resp parse failed" );
-                }
-            }
-            else
-            {
-                Serial.println( "connect failed" );
-            }
-            cl.stop( );
-        }
-            
+	client.stop( );           
 }
 
 const char* WebServer::getFilenameFromUrl( const char* url )
