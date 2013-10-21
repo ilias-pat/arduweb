@@ -1,7 +1,7 @@
 #include <SD.h>
 #include "WebServer.h"
 #include "WebClient.h"
-#include "AgiFileParser.h"
+//#include "AgiFileParser.h"
 #include <avr/pgmspace.h>
 
 #define DEFAULT_DOC	"index.htm"
@@ -17,9 +17,6 @@ typedef struct
         prog_char mime_type_ext_str##mimeType[] PROGMEM = #mimeType; \
         prog_char mime_type_str##mimeType[] PROGMEM = mimeStr; \
 		mime_type_entry mime_##mimeType PROGMEM = { mime_type_ext_str##mimeType, mime_type_str##mimeType };
-//#define DEFINE_MIME_TYPE( mimeType, mimeStr ) \
-//		mime_type_entry mime_##mimeType PROGMEM = { #mimeType, mimeStr };
-
 
 #define BEGIN_MIME_TYPE_TABLE \
 	mime_type_entry* mime_type_table[] PROGMEM = {
@@ -50,37 +47,9 @@ BEGIN_MIME_TYPE_TABLE
 	MIME_TYPE( jsn )
 END_MIME_TYPE_TABLE
 
-/*
-void PrintRequest( struct HTTPRequest& req )
-{
-  cout << ( "Version = " );
-  cout << ( req.version ) << endl;
-  cout << ( "Method = " );
-  cout << ( req.method ) << endl;
-  cout << ( "URL = " );
-  cout << ( req.url ) << endl;  
-  cout << ( "URL Filenam = " );
-  if( req.url_filename )
-	cout << ( req.url_filename ) << endl; 
-  else
-	cout << (int)0 << endl;
-  cout << ( "Data size = " );
-  cout << ( req.data_size ) << endl;  
-  cout << ( "DATA = " );
-  cout << ( req.data ) << endl;    
-}
-*/
-
-prog_char http200Ok[] PROGMEM = "HTTP/1.0 200 OK\r\nPragma: no-cache\r\n";
-prog_char http404NotFound[] PROGMEM = "HTTP/1.0 404 Not Found\r\n";
-prog_char http400BadRequest[] PROGMEM = "HTTP/1.0 400 Bad Request\r\nConnection: close\r\n";
-//prog_char httpServerStr[] PROGMEM = "Server: WebServer/0.0 (Arduino)\r\n";
-
 WebServer::WebServer( uint16_t port, const char* htdocs )
 	: Server( port )//, TxBufferIndex( 0 )
 {
-	//memset( RxBuffer, 0, RX_BUFFER_SIZE );
-	//memset( TxBuffer, 0, TX_BUFFER_SIZE );
 //	strcpy( HtDocs, htdocs );
 	
 	// remove trailing '/'
@@ -105,104 +74,23 @@ boolean WebServer::begin( void )
 
 void WebServer::process( void )
 {
-       static unsigned long time = millis( );
-        
-        if( millis( ) - time >= 15000 )
-        {
-            time = millis( );
-            Serial.println( time );
-            
-            WebClient cl;
-            Serial.println("SENDING REQUEST");            
-            if( cl.connect( IPAddress( 192, 168, 1, 230 ), 80 ) )
-            {
-                Serial.println("connected");
-                 // Make a HTTP request:
-                /*
-                struct HTTPReqHeader h;
-                h.version = HTTP_VER_1_0;
-                h.method = HTTP_METHOD_GET;
-                h.url[0] = '/';
-                h.url[1] = '\0';
-                h.content_length = 0;
-                
-                cl.writeHTTPReqHeader( h );
-                */
-                cl.writeHTTPRequest( "POST", "/ard/getDat1a.php", ( uint8_t* )"value=1", 7 );
-                
-                if( cl.waitForResponse( 3000 ) )
-                {
-                    int status;
-                    char mime[16];
-                    unsigned char data[20];
-                    int size;
-                   
-                    
-                    //struct HTTPRespHeader respH;
-                    //if( cl.readHTTPRespHeader( respH ) )
-                    if( cl.readHTTPResponse( &status, mime, data, &size, 20 ))
-                    {
-                        Serial.println( "HTTP RESP received" );
-                        Serial.print( "Status: " );
-                        Serial.println( status );                
-                        Serial.print( "MIME: " );
-                        Serial.println( mime );
-                        Serial.print( "Len: " );
-                        Serial.println( size );
-                        
-                        Serial.println( "DATA:" );
-                        int len = 0;
-                        while( len < size )
-                        {
-                            Serial.print( ( char ) data[len] );
-                            len++;
-                        }
-                        Serial.println( len );
-                    }
-                    else
-                    {
-                        Serial.println( "resp parse failed" );
-                    }
-                    
-                }
-                else
-                {
-                    Serial.println( "resp timeout" );
-                }
-            }
-            else
-            {
-                Serial.println( "connect failed" );
-            }
-            cl.stop( );
-        }
-    
-    
-    	WebClient client = WebClient( Server.available( ) );
+    WebClient client = WebClient( Server.available( ) );
 
 	if( !client || !client.connected( ) )
 		return;
-	
-	//struct HTTPReqHeader reqHeader;
 
-	//boolean result = client.readHTTPReqHeader( reqHeader );
-        char method[5];
-        char url[20];
-        int size;
-        char data[20];
-        boolean result = client.readHTTPRequest( method, url, data, &size, 20 );
-        Serial.println( result ? "PARSE ok" : "PARSE NOK" );
-	if( result )
+	int method;
+	char url[20];
+	int size;
+	char data[20];
+	if( !client.readHTTPRequest( &method, url, data, &size, 20 ) )
 	{
-                Serial.println( "HTTP Req received" );
-                Serial.print( "Method: " );
-                Serial.println( method );                
-                Serial.print( "URL: " );
-                Serial.println( url );
-                Serial.print( "Len: " );
-                Serial.println( (int)size );          
+		client.writeHTTPResponse( 400, "text/html", (uint8_t*)"<h1>400 Bad Request</h1>\r\n", 27 );
+		char* command = getCommandFromUrl( url );
+		if( command )
+			*(command-1) = '\0';
 
-                char* url_filename = strrchr( url, '/' );
+		char* url_filename = strrchr( url, '/' );
 
 		if( url_filename && ( *( ++url_filename ) == '\0' ) )
                     strcpy( ( char* )url_filename, DEFAULT_DOC );
@@ -215,9 +103,7 @@ void WebServer::process( void )
 	}
 	else
 	{
-		client.write_pgm( http400BadRequest );
-		client.write_pgm( PSTR( "Content-type: text/html\r\n\r\n" ) );
-		client.write_pgm( PSTR( "<h1>400 Bad Request</h1>\r\n" ) );
+		
 	}
 
 	//PrintRequest( request );
@@ -233,7 +119,7 @@ const char* WebServer::getFilenameFromUrl( const char* url )
 	return ++filename;
 }
 
-const char* WebServer::getCommandFromUrl( const char* url )
+char* WebServer::getCommandFromUrl( const char* url )
 {
 	return 0;
 }
@@ -271,7 +157,8 @@ void WebServer::getMimeFromExt( const char* ext, char* mime )
 		*mime = '\0';
 }
 
-boolean fileExists( const char* filepath )
+boolean fileExists( char* filepath )
 {
-
+	return SD.exists( filepath );
 }
+

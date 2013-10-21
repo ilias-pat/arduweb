@@ -13,7 +13,7 @@
 #define STATE_READ_OPTION_KEY				( 0x05 )
 #define STATE_READ_OPTION_CONTENT_LENGTH	( 0x06 )
 #define STATE_READ_OPTION_MIME_TYPE			( 0x07 )
-#define STATE_DISCARD_OPTION_VALUE    ( 0x08 )
+#define STATE_DISCARD_OPTION_VALUE			( 0x08 )
 
 WebClient::WebClient( void )
 	: EthernetClient( ), mBufferIndex( 0 )
@@ -27,13 +27,19 @@ WebClient::WebClient( const EthernetClient& client )
 	memset( mBuffer, 0, WEB_CLIENT_BUFFER_SIZE );
 }
 
-boolean WebClient::writeHTTPRequest( const char* method, const char* url, const unsigned char* data, int size )
+boolean WebClient::writeHTTPRequest( int method, const char* url, const unsigned char* data, int size )
 {
     if( !method || !url )
         return false;
 
     // write HTTP header.
-    write( method );
+    switch( method )
+    {
+    case HTTP_METHOD_GET: write( "GET" ); break;   
+    case HTTP_METHOD_POST: write( "POST" ); break;
+    default:    
+	case HTTP_METHOD_HEAD: write( "HEAD" ); break;
+    }	
     write( ' ' );
     write( url );
     write( ' ' );
@@ -45,7 +51,7 @@ boolean WebClient::writeHTTPRequest( const char* method, const char* url, const 
     write( "\r\n" );
 
     // write HTTP body.
-    if( strcmp( method, "POST" ) == 0 &&
+    if( method == HTTP_METHOD_POST &&
         data && size > 0 )
     {
         write( data, size );
@@ -54,7 +60,7 @@ boolean WebClient::writeHTTPRequest( const char* method, const char* url, const 
     return true;
 }
 
-boolean WebClient::readHTTPRequest( char* method, char* url, char* data, int* size, int max_size )
+boolean WebClient::readHTTPRequest( int* method, char* url, char* data, int* size, int max_size )
 {
     int state = STATE_READ_METHOD;
     const char* word;
@@ -75,43 +81,37 @@ boolean WebClient::readHTTPRequest( char* method, char* url, char* data, int* si
         // end of header.
         if( !strlen( word ) )
             break;
-        
-        Serial.print( '[' );
-        Serial.print( (int)state );
-        Serial.print( '[' );
-        Serial.println( word );        
- 	switch( state )
-	{
-	case STATE_READ_METHOD:
-            if( getHTTPMethodFromStr( word ) != HTTP_METHOD_INVALID )
-            {
-                strcpy( method, word );
-                state = STATE_READ_URL;
-            }
-            break;
+      
+		switch( state )
+		{
+		case STATE_READ_METHOD:
+			*method = getHTTPMethodFromStr( word );
+			if( *method != HTTP_METHOD_INVALID )
+				state = STATE_READ_URL;
+			break;
 
-	case STATE_READ_URL:
-            // TODO: urlDecode( )
-            strcpy( url, word );
-            state = STATE_READ_VERSION;
-            break;
-            
-    	case STATE_READ_VERSION:
-            if( getHTTPVersionFromStr( word ) != HTTP_VER_INVALID )
-                state = STATE_READ_OPTION_KEY;
-            break;
+		case STATE_READ_URL:
+			// TODO: urlDecode( )
+			strcpy( url, word );
+			state = STATE_READ_VERSION;
+			break;
+				
+		case STATE_READ_VERSION:
+			if( getHTTPVersionFromStr( word ) != HTTP_VER_INVALID )
+				state = STATE_READ_OPTION_KEY;
+			break;
 
-	case STATE_READ_OPTION_KEY:
-            if( strstr( word, "Content-Length:" ) )
-                state = STATE_READ_OPTION_CONTENT_LENGTH;
-            break;
+		case STATE_READ_OPTION_KEY:
+			if( strstr( word, "Content-Length:" ) )
+				state = STATE_READ_OPTION_CONTENT_LENGTH;
+			break;
 
-	case STATE_READ_OPTION_CONTENT_LENGTH:
-            if( size ) 
-                *size = atoi( word );
-	    state = STATE_READ_OPTION_KEY;
-	    break;
-        }
+		case STATE_READ_OPTION_CONTENT_LENGTH:
+			if( size ) 
+				*size = atoi( word );
+			state = STATE_READ_OPTION_KEY;
+			break;
+		}
     }
     
     // read body if any.
@@ -127,7 +127,7 @@ boolean WebClient::readHTTPRequest( char* method, char* url, char* data, int* si
     
     flush( );
     
-    if( getHTTPMethodFromStr( method ) == HTTP_METHOD_INVALID )
+    if( *method == HTTP_METHOD_INVALID )
         return false;
 
     return true; 
@@ -193,32 +193,32 @@ boolean WebClient::readHTTPResponse( int* status, char* mime_type, unsigned char
         if( !strlen( word ) )
             break;
                 
- 	switch( state )
-	{
-	case STATE_READ_VERSION:
+		switch( state )
+		{
+		case STATE_READ_VERSION:
             if( getHTTPVersionFromStr( word ) != HTTP_VER_INVALID )
                 state = STATE_READ_STATUS;
             break;
 		
-	case STATE_READ_STATUS:
+		case STATE_READ_STATUS:
             *status = getHTTPStatusFromStr( word );
             state = STATE_READ_OPTION_KEY;
             break;
 
-	case STATE_READ_OPTION_KEY:
+		case STATE_READ_OPTION_KEY:
             if( strstr( word, "Content-Length:" ) )
                 state = STATE_READ_OPTION_CONTENT_LENGTH;
             else if( strstr( word, "Content-Type:" ) )
                 state = STATE_READ_OPTION_MIME_TYPE;
             break;
 
-	case STATE_READ_OPTION_CONTENT_LENGTH:
+		case STATE_READ_OPTION_CONTENT_LENGTH:
             if( size ) 
                 *size = atoi( word );
-	    state = STATE_READ_OPTION_KEY;
+			state = STATE_READ_OPTION_KEY;
 	    break;
 		
-	case STATE_READ_OPTION_MIME_TYPE:
+		case STATE_READ_OPTION_MIME_TYPE:
             if( mime_type )
                 strcpy( mime_type, word );
             state = STATE_READ_OPTION_KEY;

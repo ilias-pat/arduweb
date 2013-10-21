@@ -34,7 +34,7 @@ private:
 	// 5. Send 404 not found.
         
 	const char* getFilenameFromUrl( const char* url );
-	const char* getCommandFromUrl( const char* url );
+	char* getCommandFromUrl( const char* url );
 	const char* getExtFromFilename( const char* filename );
 	void getMimeFromExt( const char* ext, char* mime );
 	boolean fileExists( const char* filepath );

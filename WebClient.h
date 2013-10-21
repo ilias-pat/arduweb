@@ -26,8 +26,8 @@ public:
 	WebClient( void );
 	WebClient( const EthernetClient& client );
 
-    boolean writeHTTPRequest( const char* method, const char* url, const unsigned char* data, int size );
-    boolean readHTTPRequest( char* method, char* url, char* data, int* size, int max_size );
+    boolean writeHTTPRequest( int method, const char* url, const unsigned char* data, int size );
+    boolean readHTTPRequest( int* method, char* url, char* data, int* size, int max_size );
     boolean writeHTTPResponse( int status, const char* mime_type, const unsigned char* data, int size );
     boolean readHTTPResponse( int* status, char* mime_type, unsigned char* data, int* size, int max_size );
     boolean waitForResponse( int timeout ); // in msecs
