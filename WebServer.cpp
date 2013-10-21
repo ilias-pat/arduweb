@@ -72,6 +72,54 @@ boolean WebServer::begin( void )
 	return false;
 }
 
+boolean WebServer::handleGETRequest( WebClient& client, const char* url, int contentLen )
+{
+	char* command = strrchr( url, '?' );
+	if( command )
+		*command++ = '\0'; // get rid of '?'
+	
+	char* filepath = strrchr( url, '/' );
+	if( filepath && !strlen( filepath ) )
+		strcpy( filepath, DEFAULT_DOC );
+		
+	if( command )
+	{
+		// command to user
+		
+	}
+	else
+	{
+		if( filepath && fileExists( filepath ) )
+		{
+			File file = fileOpen( filepath );
+			
+			char* ext = strrchr( filepath, '.' );
+			char mime_type[20];
+			
+			if( ext )
+				getMimeFromExt( ext, mime_type );
+				
+			// empty receive buffer.
+			client.flush( );
+			client.writeHTTPRespHeader( HTTP_STATUS_200_OK, mime_type, 0 );
+			
+			while( file.available( ) )
+				client.write( file.read( ) );
+				
+			file.close( );
+		}
+		else
+		{
+			// 404 not found
+			client.flush( );
+			client.writeHTTPRespHeader( HTTP_STATUS_404_NOT_FOUND, "text/html", 24 );
+			client.write( "<h1>404 Not Found!</h1>" );
+		}
+	}
+	
+	return true;
+}
+
 void WebServer::process( void )
 {
     WebClient client = WebClient( Server.available( ) );
@@ -81,11 +129,10 @@ void WebServer::process( void )
 
 	int method;
 	char url[20];
-	int size;
-	char data[20];
-	if( !client.readHTTPRequest( &method, url, data, &size, 20 ) )
+	int contentLen;
+	
+	if( client.readHTTPReqHeader( &method, url, &contentLen ) )
 	{
-		client.writeHTTPResponse( 400, "text/html", (uint8_t*)"<h1>400 Bad Request</h1>\r\n", 27 );
 		char* command = getCommandFromUrl( url );
 		if( command )
 			*(command-1) = '\0';
@@ -93,13 +140,14 @@ void WebServer::process( void )
 		char* url_filename = strrchr( url, '/' );
 
 		if( url_filename && ( *( ++url_filename ) == '\0' ) )
-                    strcpy( ( char* )url_filename, DEFAULT_DOC );
+			strcpy( ( char* )url_filename, DEFAULT_DOC );
                     
-                Serial.print( "Filename: " );
-                Serial.println( url_filename );                
-                Serial.print( "Data: " );
-                for( int i=0; i<size; i++ )
-                    Serial.print( (char)data[i] );                
+		Serial.print( "Filename: " );
+		Serial.println( url_filename );                
+		Serial.print( "Data: " );
+		
+		for( int i=0; i<contentLen && client.available( ); i++ )
+			Serial.print( client.read( ) );                
 	}
 	else
 	{
@@ -157,8 +205,12 @@ void WebServer::getMimeFromExt( const char* ext, char* mime )
 		*mime = '\0';
 }
 
-boolean fileExists( char* filepath )
+boolean WebServer::fileExists( char* filepath )
 {
 	return SD.exists( filepath );
 }
 
+File WebServer::fileOpen( char* filepath )
+{
+	return SD.open( filepath );
+}

@@ -32,13 +32,13 @@ private:
 	// 3b. no goto 5
 	// 4. Send 200 ok and file.
 	// 5. Send 404 not found.
-        
+    boolean handleGETRequest( class WebClient& client, const char* url, int contentLen );
 	const char* getFilenameFromUrl( const char* url );
 	char* getCommandFromUrl( const char* url );
 	const char* getExtFromFilename( const char* filename );
 	void getMimeFromExt( const char* ext, char* mime );
-	boolean fileExists( const char* filepath );
-	
+	boolean fileExists( char* filepath );
+	File fileOpen( char* filepath );
 	int processGetCommand( const char* url_filename, const char* command );
 
 
