@@ -21,9 +21,7 @@ int freeRam ()
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-   while (!Serial) {
-    ; // wait for serial port to connect. Needed for Leonardo only
-  }  
+   
   // start the Ethernet connection and the server:
   Ethernet.begin(mac, ip);
 

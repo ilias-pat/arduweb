@@ -27,7 +27,7 @@ WebClient::WebClient( const EthernetClient& client )
 	memset( mBuffer, 0, WEB_CLIENT_BUFFER_SIZE );
 }
 
-boolean WebClient::writeHTTPRequest( int method, const char* url, const unsigned char* data, int size )
+boolean WebClient::writeHTTPReqHeader( int method, const char* url, int contentLen )
 {
     if( !method || !url )
         return false;
@@ -46,21 +46,14 @@ boolean WebClient::writeHTTPRequest( int method, const char* url, const unsigned
     write( "HTTP/1.0" );
     write( "\r\n" );
     write( "Content-Length: " );
-    print( size );
+    print( contentLen );
     write( "\r\n" );
     write( "\r\n" );
-
-    // write HTTP body.
-    if( method == HTTP_METHOD_POST &&
-        data && size > 0 )
-    {
-        write( data, size );
-    }
 
     return true;
 }
 
-boolean WebClient::readHTTPRequest( int* method, char* url, char* data, int* size, int max_size )
+boolean WebClient::readHTTPReqHeader( int* method, char* url, int* contentLen )
 {
     int state = STATE_READ_METHOD;
     const char* word;
@@ -71,8 +64,7 @@ boolean WebClient::readHTTPRequest( int* method, char* url, char* data, int* siz
     // init data
     *method = '\0';
     *url = '\0';
-    *data = '\0';
-    *size = 0;
+    *contentLen = 0;
     
     // read header.
     while( word = getNextWordUntilNewLine( ) )
@@ -107,25 +99,12 @@ boolean WebClient::readHTTPRequest( int* method, char* url, char* data, int* siz
 			break;
 
 		case STATE_READ_OPTION_CONTENT_LENGTH:
-			if( size ) 
-				*size = atoi( word );
+			if( contentLen ) 
+				*contentLen = atoi( word );
 			state = STATE_READ_OPTION_KEY;
 			break;
 		}
     }
-    
-    // read body if any.
-    if( data && size )
-    {
-        if( *size > max_size )
-            *size = max_size;
-        
-        int len = 0;
-        while( available( ) && len < *size )
-            data[len++] = read( );
-    }
-    
-    flush( );
     
     if( *method == HTTP_METHOD_INVALID )
         return false;
@@ -133,7 +112,7 @@ boolean WebClient::readHTTPRequest( int* method, char* url, char* data, int* siz
     return true; 
 }
 
-boolean WebClient::writeHTTPResponse( int status, const char* mime_type, const unsigned char* data, int size )
+boolean WebClient::writeHTTPRespHeader( int status, const char* mime_type, int contentLen )
 {
     if( !status )
         return false;
@@ -158,20 +137,14 @@ boolean WebClient::writeHTTPResponse( int status, const char* mime_type, const u
     }
     write( "Content-Length:" );
     write( ' ' );    
-    print( size );
+    print( contentLen );
     write( "\r\n" );
     write( "\r\n" );
-    
-    // write HTTP body
-    if( data && size > 0 )
-    {
-        write( data, size );  
-    }
     
     return true;
 }
 
-boolean WebClient::readHTTPResponse( int* status, char* mime_type, unsigned char* data, int* size, int max_size )
+boolean WebClient::readHTTPRespHeader( int* status, char* mime_type, int* contentLen )
 {
     int state = STATE_READ_VERSION;
     const char* word;
@@ -182,8 +155,7 @@ boolean WebClient::readHTTPResponse( int* status, char* mime_type, unsigned char
     // init data
     *status = HTTP_STATUS_INVALID;
     *mime_type = '\0';
-    *data = '\0';
-    *size = 0;
+    *contentLen = 0;
     
     // read header.
     while( word = getNextWordUntilNewLine( ) )
@@ -213,8 +185,8 @@ boolean WebClient::readHTTPResponse( int* status, char* mime_type, unsigned char
             break;
 
 		case STATE_READ_OPTION_CONTENT_LENGTH:
-            if( size ) 
-                *size = atoi( word );
+            if( contentLen ) 
+                *contentLen = atoi( word );
 			state = STATE_READ_OPTION_KEY;
 	    break;
 		
@@ -225,19 +197,6 @@ boolean WebClient::readHTTPResponse( int* status, char* mime_type, unsigned char
             break;
         }
     }
-    
-    // read body if any.
-    if( data && size )
-    {
-        if( *size > max_size )
-            *size = max_size;
-        
-        int len = 0;
-        while( available( ) && len < *size )
-            data[len++] = read( );
-    }
-    
-    flush( );
     
     if( *status == HTTP_STATUS_INVALID )
         return false;
@@ -346,9 +305,9 @@ int WebClient::getHTTPStatusFromStr( const char* str )
 int WebClient::decodeUrl( char *str )
 {
 	char* src = str;
-        char* dest = str;
-        char* end = str + strlen( str );
+	char* dest = str;
 	int len = strlen( str );
+	char* end = str + len;
 	char c1;
 	char c2;
 	
