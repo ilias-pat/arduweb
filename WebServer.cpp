@@ -82,10 +82,11 @@ boolean WebServer::handleGETRequest( WebClient& client, const char* url, int con
 	if( filepath && !strlen( filepath ) )
 		strcpy( filepath, DEFAULT_DOC );
 		
-	if( command )
+	if( command && UserCommandHandler)
 	{
 		// command to user
-		
+		// filepath is command name, the rest is command data
+		UserCommandHandler( filepath, command );		
 	}
 	else
 	{

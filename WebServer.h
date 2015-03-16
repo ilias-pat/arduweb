@@ -13,6 +13,8 @@
 //#define TX_BUFFER_SIZE			32
 #define HTDOCS_FILEPATH_SIZE	        64
 
+typedef void ( *handleCommandFn )( char* command, char* commandData );
+
 class WebServer
 {
 public:
@@ -21,7 +23,8 @@ public:
 	
 	boolean begin( void );
 	void process( void );
-
+	void registerCommandHandler( handleCommandFn handler ) { UserCommandHandler = handler; }
+	
 private:
 	// 1, is it a command
 	// 1a. yes, goto 2
@@ -48,7 +51,7 @@ private:
 
 	EthernetServer Server;
 //	char HtDocs[HTDOCS_FILEPATH_SIZE];
-
+	handleCommandFn UserCommandHandler;
 };
 /*
 struct HTTPRequest
